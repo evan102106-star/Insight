@@ -1,46 +1,43 @@
-from flask import Flask, request, jsonify, render_template
-import mysql.connector
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 import pandas as pd
+from sqlalchemy import create_engine, text, bindparam
 
 app = Flask(__name__)
 
-# ---------------- DB CONNECTION ----------------
-db = mysql.connector.connect(
-    host="localhost",
-    user="asad",
-    password="1234",
-    database="hack",
-    port=3000
-)
+# ---------------- DB ----------------
+engine = create_engine("mysql+mysqlconnector://asad:1234@localhost:3000/hack")
 
-cursor = db.cursor(dictionary=True)
 
 # ---------------- ANOMALY DETECTION ----------------
 def detect_anomalies():
 
-    sessions = pd.read_sql("SELECT * FROM sessions", db)
-    files = pd.read_sql("SELECT * FROM file_activity", db)
+    sessions = pd.read_sql("SELECT * FROM sessions", engine)
+    files = pd.read_sql("SELECT * FROM file_activity", engine)
 
     if sessions.empty:
         return []
 
+    # LOGIN TIME
     sessions['login_hour'] = pd.to_datetime(sessions['login_time']).dt.hour
-
     mean_login = sessions['login_hour'].mean()
     std_login = sessions['login_hour'].std()
 
     sessions['login_anomaly'] = abs(sessions['login_hour'] - mean_login) > std_login
 
+    # SESSION DURATION
     sessions['login_time'] = pd.to_datetime(sessions['login_time'])
     sessions['logout_time'] = pd.to_datetime(sessions['logout_time'])
 
-    sessions['duration'] = (sessions['logout_time'] - sessions['login_time']).dt.total_seconds()
+    sessions['duration'] = (
+        sessions['logout_time'] - sessions['login_time']
+    ).dt.total_seconds().fillna(0)
 
     mean_dur = sessions['duration'].mean()
     std_dur = sessions['duration'].std()
 
     sessions['duration_anomaly'] = abs(sessions['duration'] - mean_dur) > std_dur
 
+    # FILE ACTIVITY
     if not files.empty:
         file_counts = files.groupby('session_id').size().reset_index(name='file_count')
 
@@ -58,6 +55,7 @@ def detect_anomalies():
     else:
         sessions['file_anomaly'] = False
 
+    # FINAL SCORE
     sessions['risk_score'] = (
         sessions['login_anomaly'].astype(int) +
         sessions['duration_anomaly'].astype(int) +
@@ -69,7 +67,7 @@ def detect_anomalies():
     return suspicious.to_dict(orient='records')
 
 
-# ---------------- HOME: ONLY SUSPICIOUS ----------------
+# ---------------- HOME ----------------
 @app.route('/')
 def dashboard():
     suspicious = detect_anomalies()
@@ -80,37 +78,71 @@ def dashboard():
 @app.route('/user/<username>')
 def user_detail(username):
 
-    cursor.execute("SELECT * FROM sessions WHERE username=%s", (username,))
-    sessions = cursor.fetchall()
+    with engine.connect() as conn:
 
-    session_ids = [str(s['id']) for s in sessions]
+        sessions = pd.read_sql(
+            text("SELECT * FROM sessions WHERE username=:u"),
+            conn,
+            params={"u": username}
+        )
 
-    if not session_ids:
-        return "No data"
+        if sessions.empty:
+            return render_template("index.html", suspicious=[], error="User not found")
 
-    ids = ",".join(session_ids)
+        session_ids = sessions['id'].tolist()
 
-    cursor.execute(f"SELECT * FROM file_activity WHERE session_id IN ({ids})")
-    files = cursor.fetchall()
+        if not session_ids:
+            return render_template("index.html", suspicious=[], error="No sessions found")
 
-    cursor.execute(f"SELECT * FROM network_activity WHERE session_id IN ({ids})")
-    network = cursor.fetchall()
+        # -------- FIXED IN QUERY --------
+        files = pd.read_sql(
+            text("SELECT * FROM file_activity WHERE session_id IN :ids")
+            .bindparams(bindparam("ids", expanding=True)),
+            conn,
+            params={"ids": session_ids}
+        )
 
-    cursor.execute(f"SELECT * FROM usb_usage WHERE session_id IN ({ids})")
-    usb = cursor.fetchall()
+        network = pd.read_sql(
+            text("SELECT * FROM network_activity WHERE session_id IN :ids")
+            .bindparams(bindparam("ids", expanding=True)),
+            conn,
+            params={"ids": session_ids}
+        )
 
-    cursor.execute(f"SELECT * FROM app_usage WHERE session_id IN ({ids})")
-    apps = cursor.fetchall()
+        usb = pd.read_sql(
+            text("SELECT * FROM usb_usage WHERE session_id IN :ids")
+            .bindparams(bindparam("ids", expanding=True)),
+            conn,
+            params={"ids": session_ids}
+        )
+
+        apps = pd.read_sql(
+            text("SELECT * FROM app_usage WHERE session_id IN :ids")
+            .bindparams(bindparam("ids", expanding=True)),
+            conn,
+            params={"ids": session_ids}
+        )
 
     return render_template(
         "user.html",
         username=username,
-        sessions=sessions,
-        files=files,
-        network=network,
-        usb=usb,
-        apps=apps
+        sessions=sessions.to_dict(orient="records"),
+        files=files.to_dict(orient="records"),
+        network=network.to_dict(orient="records"),
+        usb=usb.to_dict(orient="records"),
+        apps=apps.to_dict(orient="records")
     )
+
+
+# ---------------- SEARCH ----------------
+@app.route('/search', methods=['POST'])
+def search_user():
+    username = request.form.get('username')
+
+    if not username:
+        return redirect(url_for('dashboard'))
+
+    return redirect(url_for('user_detail', username=username))
 
 
 # ---------------- API ROUTES ----------------
@@ -118,25 +150,26 @@ def user_detail(username):
 def start_session():
     data = request.json
 
-    cursor.execute(
-        "INSERT INTO sessions (username, system_id, login_time) VALUES (%s, %s, NOW())",
-        (data['username'], data['system_id'])
-    )
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("INSERT INTO sessions (username, system_id, login_time) VALUES (:u, :s, NOW())"),
+            {"u": data['username'], "s": data['system_id']}
+        )
+        session_id = result.lastrowid
 
-    db.commit()
-    return jsonify({"session_id": cursor.lastrowid})
+    return jsonify({"session_id": session_id})
 
 
 @app.route('/end_session', methods=['POST'])
 def end_session():
     data = request.json
 
-    cursor.execute(
-        "UPDATE sessions SET logout_time = NOW() WHERE id = %s",
-        (data['session_id'],)
-    )
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE sessions SET logout_time = NOW() WHERE id=:id"),
+            {"id": data['session_id']}
+        )
 
-    db.commit()
     return jsonify({"status": "ended"})
 
 
@@ -144,12 +177,12 @@ def end_session():
 def app_usage():
     data = request.json
 
-    cursor.execute(
-        "INSERT INTO app_usage (session_id, app_name, usage_time) VALUES (%s, %s, %s)",
-        (data['session_id'], data['app_name'], data['usage_time'])
-    )
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO app_usage (session_id, app_name, usage_time) VALUES (:sid, :app, :time)"),
+            {"sid": data['session_id'], "app": data['app_name'], "time": data['usage_time']}
+        )
 
-    db.commit()
     return jsonify({"status": "ok"})
 
 
@@ -157,12 +190,20 @@ def app_usage():
 def usb_usage():
     data = request.json
 
-    cursor.execute(
-        "INSERT INTO usb_usage (session_id, device_name, start_time, end_time, duration) VALUES (%s, %s, %s, %s, %s)",
-        (data['session_id'], data['device_name'], data['start_time'], data['end_time'], data['duration'])
-    )
+    with engine.begin() as conn:
+        conn.execute(
+            text("""INSERT INTO usb_usage 
+            (session_id, device_name, start_time, end_time, duration)
+            VALUES (:sid, :dev, :start, :end, :dur)"""),
+            {
+                "sid": data['session_id'],
+                "dev": data['device_name'],
+                "start": data['start_time'],
+                "end": data['end_time'],
+                "dur": data['duration']
+            }
+        )
 
-    db.commit()
     return jsonify({"status": "ok"})
 
 
@@ -170,12 +211,19 @@ def usb_usage():
 def network_activity():
     data = request.json
 
-    cursor.execute(
-        "INSERT INTO network_activity (session_id, bytes_sent, bytes_received, connections, timestamp) VALUES (%s, %s, %s, %s, NOW())",
-        (data['session_id'], data['bytes_sent'], data['bytes_received'], data['connections'])
-    )
+    with engine.begin() as conn:
+        conn.execute(
+            text("""INSERT INTO network_activity 
+            (session_id, bytes_sent, bytes_received, connections, timestamp)
+            VALUES (:sid, :s, :r, :c, NOW())"""),
+            {
+                "sid": data['session_id'],
+                "s": data['bytes_sent'],
+                "r": data['bytes_received'],
+                "c": data['connections']
+            }
+        )
 
-    db.commit()
     return jsonify({"status": "ok"})
 
 
@@ -183,21 +231,22 @@ def network_activity():
 def file_activity():
     data = request.json
 
-    cursor.execute(
-        "INSERT INTO file_activity (session_id, file_path, file_size, event_type, timestamp) VALUES (%s, %s, %s, %s, NOW())",
-        (data['session_id'], data['file_path'], data['file_size'], data['event_type'])
-    )
+    with engine.begin() as conn:
+        conn.execute(
+            text("""INSERT INTO file_activity 
+            (session_id, file_path, file_size, event_type, timestamp)
+            VALUES (:sid, :path, :size, :type, NOW())"""),
+            {
+                "sid": data['session_id'],
+                "path": data['file_path'],
+                "size": data['file_size'],
+                "type": data['event_type']
+            }
+        )
 
-    db.commit()
     return jsonify({"status": "ok"})
-@app.route('/search', methods=['POST'])
-def search_user():
-    username = request.form.get('username')
 
-    if not username:
-        return "Enter username"
 
-    return user_detail(username)
-
+# ---------------- RUN ----------------
 if __name__ == "__main__":
     app.run(debug=True)

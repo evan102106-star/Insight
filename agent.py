@@ -9,9 +9,13 @@ import win32evtlog
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import os
+import json
+import string
+import atexit
 
 # ---------------- CONFIG ----------------
 SERVER = "http://localhost:5000"
+SESSION_FILE = "session.json"
 
 session_id = None
 app_start_times = {}
@@ -33,6 +37,25 @@ ALLOWED_PATHS = [
 IMPORTANT_EXTENSIONS = [".pdf", ".docx", ".xlsx", ".zip", ".txt", ".csv"]
 
 
+# ---------------- SESSION STORAGE ----------------
+def load_session():
+    if os.path.exists(SESSION_FILE):
+        with open(SESSION_FILE, "r") as f:
+            return json.load(f)
+    return None
+
+
+def save_session(data):
+    with open(SESSION_FILE, "w") as f:
+        json.dump(data, f)
+
+
+def clear_session():
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
+
+
+# ---------------- FILTERS ----------------
 def is_user_file(path):
     path = path.lower()
 
@@ -56,7 +79,7 @@ def is_user_active():
     return title != ""
 
 
-# ---------------- SESSION ----------------
+# ---------------- LOGIN CONTEXT ----------------
 def get_login_context():
     try:
         hand = win32evtlog.OpenEventLog('localhost', 'Security')
@@ -82,8 +105,16 @@ def get_login_context():
     return login_type, failed_attempts
 
 
+# ---------------- SESSION ----------------
 def start_session():
     global session_id
+
+    existing = load_session()
+
+    if existing:
+        session_id = existing["session_id"]
+        print("Reusing session:", session_id)
+        return
 
     login_type, failed_attempts = get_login_context()
 
@@ -95,14 +126,33 @@ def start_session():
         "failed_attempts": failed_attempts
     }
 
-    res = requests.post(f"{SERVER}/start_session", json=data)
-    session_id = res.json()['session_id']
+    try:
+        res = requests.post(f"{SERVER}/start_session", json=data)
+        session_id = res.json()['session_id']
+
+        save_session({"session_id": session_id})
+        print("New session started:", session_id)
+
+    except:
+        print("Server not reachable")
 
 
 def end_session():
-    requests.post(f"{SERVER}/end_session", json={
-        "session_id": session_id
-    })
+    global session_id
+
+    try:
+        if session_id:
+            requests.post(f"{SERVER}/end_session", json={
+                "session_id": session_id
+            })
+    except:
+        pass
+
+    clear_session()
+    print("Session ended")
+
+
+atexit.register(end_session)
 
 
 # ---------------- APP TRACKING ----------------
@@ -122,27 +172,37 @@ def track_apps():
         duration = int(now - app_start_times[a])
 
         if duration > 60:
-            requests.post(f"{SERVER}/app_usage", json={
-                "session_id": session_id,
-                "app_name": a,
-                "usage_time": duration
-            })
+            try:
+                requests.post(f"{SERVER}/app_usage", json={
+                    "session_id": session_id,
+                    "app_name": a,
+                    "usage_time": duration
+                })
+            except:
+                pass
+
             app_start_times[a] = now
 
 
 # ---------------- USB TRACKING ----------------
+def get_removable_drives():
+    drives = []
+    for part in psutil.disk_partitions():
+        if part.device and part.device[0] in string.ascii_uppercase:
+            if "cdrom" not in part.opts.lower():
+                drives.append(part.device)
+    return set(drives)
+
+
 def track_usb():
     global usb_connected
 
     current = get_removable_drives()
     now = datetime.now()
 
-    # New USB
     for dev in current - usb_connected.keys():
-        print("USB INSERTED:", dev)  # DEBUG
         usb_connected[dev] = now
 
-    # Removed USB
     for dev in list(usb_connected):
         if dev not in current:
             start = usb_connected.pop(dev)
@@ -150,15 +210,18 @@ def track_usb():
 
             duration = int((end - start).total_seconds())
 
-            print("USB REMOVED:", dev)  # DEBUG
+            try:
+                requests.post(f"{SERVER}/usb_usage", json={
+                    "session_id": session_id,
+                    "device_name": dev,
+                    "start_time": start.strftime("%Y-%m-%d %H:%M:%S"),
+                    "end_time": end.strftime("%Y-%m-%d %H:%M:%S"),
+                    "duration": duration
+                })
+            except:
+                pass
 
-            requests.post(f"{SERVER}/usb_usage", json={
-                "session_id": session_id,
-                "device_name": dev,
-                "start_time": start.strftime("%Y-%m-%d %H:%M:%S"),
-                "end_time": end.strftime("%Y-%m-%d %H:%M:%S"),
-                "duration": duration
-            })
+
 # ---------------- NETWORK ----------------
 def track_network():
     global last_bytes_sent, last_bytes_recv
@@ -176,12 +239,15 @@ def track_network():
 
     connections = len(psutil.net_connections())
 
-    requests.post(f"{SERVER}/network_activity", json={
-        "session_id": session_id,
-        "bytes_sent": delta_sent,
-        "bytes_received": delta_recv,
-        "connections": connections
-    })
+    try:
+        requests.post(f"{SERVER}/network_activity", json={
+            "session_id": session_id,
+            "bytes_sent": delta_sent,
+            "bytes_received": delta_recv,
+            "connections": connections
+        })
+    except:
+        pass
 
 
 # ---------------- FILE MONITOR ----------------
@@ -202,12 +268,15 @@ class FileHandler(FileSystemEventHandler):
         except:
             size = 0
 
-        requests.post(f"{SERVER}/file_activity", json={
-            "session_id": session_id,
-            "file_path": event.src_path,
-            "file_size": size,
-            "event_type": event_type
-        })
+        try:
+            requests.post(f"{SERVER}/file_activity", json={
+                "session_id": session_id,
+                "file_path": event.src_path,
+                "file_size": size,
+                "event_type": event_type
+            })
+        except:
+            pass
 
     def on_created(self, event):
         self.process(event, "created")
@@ -220,13 +289,9 @@ class FileHandler(FileSystemEventHandler):
 
 
 def start_file_monitor():
-    path = USER_DIR
-
-    event_handler = FileHandler()
     observer = Observer()
-    observer.schedule(event_handler, path, recursive=True)
+    observer.schedule(FileHandler(), USER_DIR, recursive=True)
     observer.start()
-
     return observer
 
 
@@ -247,17 +312,7 @@ def run():
         end_session()
 
     observer.join()
-for part in psutil.disk_partitions():
-    print("DEVICE:", part.device, "OPTS:", part.opts)
-import string
 
-def get_removable_drives():
-    drives = []
-    for part in psutil.disk_partitions():
-        # Windows USB usually shows as new drive letters (D:, E:, F:)
-        if part.device and part.device[0] in string.ascii_uppercase:
-            if "cdrom" not in part.opts.lower():
-                drives.append(part.device)
-    return set(drives)
+
 if __name__ == "__main__":
     run()
