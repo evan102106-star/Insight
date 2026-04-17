@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<h1>🚨 Security Alerts Center</h1>
+
+{% if alerts and alerts|length > 0 %}
+
+<div style="display:flex; flex-direction:column; gap:10px;">
+
+    {% for a in alerts %}
+    <div style="
+        background:#7f1d1d;
+        color:white;
+        padding:12px;
+        border-radius:10px;
+        font-weight:bold;
+    ">
+
+        🚨 Action: {{ a.action }} |
+        Session: {{ a.session_id }}
+
+    </div>
+    {% endfor %}
+
+</div>
+
+{% else %}
+
+<p style="color:green;">✅ No active security alerts</p>
+
+{% endif %}
+
+{% endblock %}

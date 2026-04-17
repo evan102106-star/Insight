@@ -2,102 +2,194 @@
 
 {% block content %}
 
-<h1>🔍 User Investigation: {{ username }}</h1>
+<!-- HEADER -->
+<div class="card">
+    <h2>🔍 Session Investigation</h2>
+    <p><strong>User:</strong> {{ session.username if session else "Unknown User" }}</p>
+</div>
 
-<!-- 🔐 Sessions -->
+<!-- ===================== SESSIONS ===================== -->
+<div class="card">
+    <div class="section-title">📌 Sessions</div>
 
-<h2>Sessions</h2>
-<table>
-<tr>
-<th>Login</th>
-<th>Logout</th>
-</tr>
+    {% if sessions %}
+    <table>
+        <thead>
+            <tr>
+                <th>Session ID</th>
+                <th>Login Time</th>
+                <th>Logout Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in sessions %}
+            <tr>
+                <td>{{ s.id }}</td>
+                <td>{{ s.login_time }}</td>
+                <td>
+                    {% if s.logout_time %}
+                        {{ s.logout_time }}
+                    {% else %}
+                        <span class="status-normal">Active</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No session data available</div>
+    {% endif %}
+</div>
 
-{% for s in sessions %}
+<!-- ===================== FILE ACTIVITY ===================== -->
+<div class="card">
+    <div class="section-title">📁 File Activity</div>
 
-<tr>
-<td>{{ s.login_time }}</td>
-<td>{{ s.logout_time }}</td>
-</tr>
-{% endfor %}
-</table>
+    {% if files %}
+    <table>
+        <thead>
+            <tr>
+                <th>File Path</th>
+                <th>Action</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in files %}
+            <tr>
+                <td>{{ f.file_path or "Unknown" }}</td>
+                <td><span class="action-badge">{{ f.event_type or "EVENT" }}</span></td>
+                <td>{{ f.timestamp or "N/A" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No file activity</div>
+    {% endif %}
+</div>
 
-<!-- 📁 Files -->
+<!-- ===================== NETWORK ===================== -->
+<div class="card">
+    <div class="section-title">🌐 Network Activity</div>
 
-<h2>File Activity</h2>
-<table>
-<tr>
-<th>File</th>
-<th>Action</th>
-<th>Time</th>
-</tr>
+    {% if network %}
+    <table>
+        <thead>
+            <tr>
+                <th>Bytes Sent</th>
+                <th>Bytes Received</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for n in network %}
+            <tr>
+                <td>{{ n.bytes_sent }}</td>
+                <td>{{ n.bytes_received }}</td>
+                <td>{{ n.timestamp }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No network activity</div>
+    {% endif %}
+</div>
 
-{% for f in files %}
+<!-- ===================== USB ===================== -->
+<div class="card">
+    <div class="section-title">🔌 USB Activity</div>
 
-<tr>
-<td>{{ f.file_path }}</td>
-<td>{{ f.event_type }}</td>
-<td>{{ f.timestamp }}</td>
-</tr>
-{% endfor %}
-</table>
+    {% if usb %}
+    <table>
+        <thead>
+            <tr>
+                <th>Device</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in usb %}
+            <tr>
+                <td>{{ u.device_name or "USB Device" }}</td>
+                <td>{{ u.timestamp or "N/A" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No USB activity</div>
+    {% endif %}
+</div>
 
-<!-- 🌐 Network -->
+<!-- ===================== APPS ===================== -->
+<div class="card">
+    <div class="section-title">🖥️ Application Usage</div>
 
-<h2>Network</h2>
-<table>
-<tr>
-<th>Sent</th>
-<th>Received</th>
-<th>Connections</th>
-</tr>
+    {% if apps %}
+    <table>
+        <thead>
+            <tr>
+                <th>App Name</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in apps %}
+            <tr>
+                <td>{{ a.app_name }}</td>
+                <td>{{ a.timestamp }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No application usage</div>
+    {% endif %}
+</div>
 
-{% for n in network %}
+<!-- ===================== SUMMARY ===================== -->
+<div class="card">
+    <div class="section-title">🚨 Behavior Summary</div>
 
-<tr>
-<td>{{ n.bytes_sent }}</td>
-<td>{{ n.bytes_received }}</td>
-<td>{{ n.connections }}</td>
-</tr>
-{% endfor %}
-</table>
+    <div style="background:#1f2937; padding:15px; border-radius:10px;">
 
-<!-- 🔌 USB -->
+        {% set alerts = 0 %}
 
-<h2>USB Usage</h2>
-<table>
-<tr>
-<th>Device</th>
-<th>Duration</th>
-</tr>
+        {% if network and network|length > 10 %}
+            <p class="risk-high">🌐 High network activity detected</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
-{% for u in usb %}
+        {% if files and files|length > 20 %}
+            <p class="risk-high">📁 Heavy file activity detected</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
-<tr>
-<td>{{ u.device_name }}</td>
-<td>{{ u.duration }}</td>
-</tr>
-{% endfor %}
-</table>
+        {% if usb and usb|length > 0 %}
+            <p class="risk-medium">🔌 USB usage detected</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
-<!-- 🖥️ Apps -->
+        {% if apps and apps|length > 10 %}
+            <p class="risk-medium">🖥️ Excessive application switching</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
-<h2>Applications</h2>
-<table>
-<tr>
-<th>App</th>
-<th>Usage Time</th>
-</tr>
+        {% if alerts == 0 %}
+            <p class="status-normal">✅ No suspicious activity found</p>
+        {% endif %}
 
-{% for a in apps %}
+    </div>
+</div>
 
-<tr>
-<td>{{ a.app_name }}</td>
-<td>{{ a.usage_time }}</td>
-</tr>
-{% endfor %}
-</table>
-
-<a href="/">⬅ Back</a>
+<!-- BACK BUTTON -->
+<div style="margin-top: 15px;">
+    <a href="/" style="text-decoration:none;">
+        ← Back to Dashboard
+    </a>
+</div>
 
 {% endblock %}

@@ -8,9 +8,10 @@ import numpy as np
 app = Flask(__name__)
 
 # =========================================================
-# DB CONNECTION
+# DB CONNECTION  — update credentials as needed
 # =========================================================
 engine = create_engine("mysql+mysqlconnector://asad:1234@localhost:3000/hack")
+# NOTE: MySQL default port is 3306, not 3000
 
 # =========================================================
 # ML CORE
@@ -30,10 +31,9 @@ FEATURES = [
 ]
 
 # =========================================================
-# FEATURE ENGINE (FIXED)
+# FEATURE ENGINE
 # =========================================================
 def build_features():
-
     sessions = pd.read_sql("SELECT * FROM sessions", engine)
     files = pd.read_sql("SELECT * FROM file_activity", engine)
     network = pd.read_sql("SELECT * FROM network_activity", engine)
@@ -75,6 +75,7 @@ def build_features():
 
     return df.fillna(0)
 
+
 # =========================================================
 # TRAIN
 # =========================================================
@@ -84,20 +85,20 @@ def train(df):
     model.fit(X)
     trained = True
 
+
 # =========================================================
 # SCORE
 # =========================================================
 def score(row):
     X = np.array([[row[f] for f in FEATURES]])
     X = scaler.transform(X)
-
     pred = model.predict(X)[0]
     conf = model.decision_function(X)[0]
-
     return {
         "ml_label": "ANOMALY" if pred == -1 else "NORMAL",
         "ml_score": float(conf)
     }
+
 
 # =========================================================
 # ACTION ENGINE
@@ -113,12 +114,12 @@ def decide_action(risk_score, row):
         return "LIMIT_NETWORK"
     return "ALLOW"
 
+
 # =========================================================
 # SEND ACTION
 # =========================================================
 def send_action(session_id, action):
     with engine.begin() as conn:
-
         exists = conn.execute(
             text("""
                 SELECT COUNT(*) FROM action_queue
@@ -138,11 +139,11 @@ def send_action(session_id, action):
             {"sid": session_id, "action": action}
         )
 
+
 # =========================================================
 # DETECTION ENGINE
 # =========================================================
 def detect_fingerprints():
-
     global trained
 
     df = build_features()
@@ -156,7 +157,6 @@ def detect_fingerprints():
     results = []
 
     for _, row in df.iterrows():
-
         r = row.to_dict()
         r.update(score(row))
 
@@ -185,12 +185,13 @@ def detect_fingerprints():
 
     return results
 
+
 # =========================================================
 # ROUTES
-# =========================================================
-@app.route("/")
+# ========================================================@app.route("/")
+@app.route('/')
 def dashboard():
-    return render_template("index.html", suspicious=detect_fingerprints())
+    return render_template("index.html")
 
 
 @app.route("/live_stream")
@@ -200,37 +201,21 @@ def live_stream():
 
 @app.route("/session/<int:session_id>")
 def session_detail(session_id):
-
     with engine.connect() as conn:
-
         session = pd.read_sql(
-            text("SELECT * FROM sessions WHERE id=:id"),
-            conn,
-            params={"id": session_id}
+            text("SELECT * FROM sessions WHERE id=:id"), conn, params={"id": session_id}
         )
-
         files = pd.read_sql(
-            text("SELECT * FROM file_activity WHERE session_id=:id"),
-            conn,
-            params={"id": session_id}
+            text("SELECT * FROM file_activity WHERE session_id=:id"), conn, params={"id": session_id}
         )
-
         network = pd.read_sql(
-            text("SELECT * FROM network_activity WHERE session_id=:id"),
-            conn,
-            params={"id": session_id}
+            text("SELECT * FROM network_activity WHERE session_id=:id"), conn, params={"id": session_id}
         )
-
         usb = pd.read_sql(
-            text("SELECT * FROM usb_usage WHERE session_id=:id"),
-            conn,
-            params={"id": session_id}
+            text("SELECT * FROM usb_usage WHERE session_id=:id"), conn, params={"id": session_id}
         )
-
         apps = pd.read_sql(
-            text("SELECT * FROM app_usage WHERE session_id=:id"),
-            conn,
-            params={"id": session_id}
+            text("SELECT * FROM app_usage WHERE session_id=:id"), conn, params={"id": session_id}
         )
 
     return render_template(
@@ -242,17 +227,14 @@ def session_detail(session_id):
         apps=apps.to_dict(orient="records")
     )
 
-# =========================================================
-# SEARCH (FIXED)
-# =========================================================
+
 @app.route("/search", methods=["POST"])
 def search():
     query = request.form.get("query", "").strip()
-
     if query.isdigit():
         return redirect(url_for("session_detail", session_id=int(query)))
-
     return redirect(url_for("dashboard"))
+
 
 # =========================================================
 # SESSION APIs
@@ -260,49 +242,122 @@ def search():
 @app.route("/start_session", methods=["POST"])
 def start_session():
     data = request.json
-
     with engine.begin() as conn:
         res = conn.execute(
-            text("INSERT INTO sessions (username, system_id, login_time) VALUES (:u,:s,NOW())"),
-            {"u": data["username"], "s": data["system_id"]}
+            text("""
+                INSERT INTO sessions (username, system_id, ip_address, login_time)
+                VALUES (:u, :s, :ip, NOW())
+            """),
+            {"u": data["username"], "s": data["system_id"], "ip": data.get("ip_address", "")}
         )
-        return jsonify({"session_id": res.lastrowid})
+    return jsonify({"session_id": res.lastrowid})
+
 
 @app.route("/end_session", methods=["POST"])
 def end_session():
     data = request.json
-
     with engine.begin() as conn:
         conn.execute(
             text("UPDATE sessions SET logout_time=NOW() WHERE id=:id"),
             {"id": data["session_id"]}
         )
-
     return jsonify({"status": "ended"})
 
+
 # =========================================================
-# ACTION API
+# IDLE ACTIVITY API  — was missing, caused 404 every loop
+# =========================================================
+@app.route("/idle_activity", methods=["POST"])
+def idle_activity():
+    data = request.json
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO idle_activity (session_id, idle_time, timestamp)
+                VALUES (:sid, :idle, NOW())
+            """),
+            {"sid": data["session_id"], "idle": data["idle_time"]}
+        )
+    return jsonify({"status": "ok"})
+
+
+# =========================================================
+# APP TRACKING API  — was missing, agent never sent app data
+# =========================================================
+@app.route("/track_app", methods=["POST"])
+def track_app():
+    data = request.json
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO app_usage (session_id, app_name, timestamp)
+                VALUES (:sid, :app, NOW())
+            """),
+            {"sid": data["session_id"], "app": data["app_name"]}
+        )
+    return jsonify({"status": "ok"})
+
+
+# =========================================================
+# NETWORK TRACKING API  — was missing, agent never sent network data
+# =========================================================
+@app.route("/track_network", methods=["POST"])
+def track_network():
+    data = request.json
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO network_activity (session_id, bytes_sent, bytes_received, timestamp)
+                VALUES (:sid, :sent, :recv, NOW())
+            """),
+            {"sid": data["session_id"], "sent": data["bytes_sent"], "recv": data["bytes_received"]}
+        )
+    return jsonify({"status": "ok"})
+
+
+# =========================================================
+# ACTION API  — now filters by session_id properly
 # =========================================================
 @app.route("/get_actions")
 def get_actions():
+    session_id = request.args.get("session_id")
     with engine.connect() as conn:
-        df = pd.read_sql(text("SELECT * FROM action_queue WHERE status='PENDING'"), conn)
-
+        if session_id:
+            df = pd.read_sql(
+                text("SELECT * FROM action_queue WHERE status='PENDING' AND session_id=:sid"),
+                conn,
+                params={"sid": session_id}
+            )
+        else:
+            df = pd.read_sql(
+                text("SELECT * FROM action_queue WHERE status='PENDING'"),
+                conn
+            )
     return jsonify({"actions": df.to_dict(orient="records")})
 
 
 @app.route("/complete_action", methods=["POST"])
 def complete_action():
     data = request.json
-
     with engine.begin() as conn:
         conn.execute(
             text("UPDATE action_queue SET status='DONE' WHERE id=:id"),
             {"id": data["id"]}
         )
-
     return jsonify({"status": "done"})
+@app.route("/alerts")
+def alerts():
+    with engine.connect() as conn:
+        df = pd.read_sql(
+            text("""
+                SELECT * FROM action_queue
+                WHERE status='PENDING'
+                ORDER BY id DESC
+            """),
+            conn
+        )
 
+    return render_template("alert.html", alerts=df.to_dict(orient="records"))
 # =========================================================
 # RUN
 # =========================================================

@@ -2,56 +2,77 @@
 
 {% block content %}
 
-<h1>🚨 Insider Threat Console</h1>
+<!-- SEARCH CARD -->
+<div class="card">
+    <div class="section-title">🔍 Search Session</div>
 
-<!-- SEARCH -->
-<div class="section-title">Search User</div>
+    <form method="POST" action="/search">
+        <div class="search-bar">
+            <input type="text" name="query" placeholder="Enter session ID..." required>
+            <button type="submit">Search</button>
+        </div>
+    </form>
+</div>
 
-<form method="POST" action="/search">
-    <div class="search-bar">
-        <input type="text" name="username" placeholder="Enter username to investigate..." required>
-        <button type="submit">Search</button>
-    </div>
-</form>
+<!-- SUSPICIOUS TABLE -->
+<div class="card">
+    <div class="section-title">🚨 Suspicious Sessions</div>
 
-<!-- SUSPICIOUS USERS -->
-<div class="section-title">Suspicious Users</div>
+    {% if suspicious and suspicious|length > 0 %}
 
-{% if suspicious and suspicious|length > 0 %}
-
-<div class="table-wrapper suspicious-table">
     <table>
         <thead>
             <tr>
-                <th>User</th>
-                <th>Login Time</th>
+                <th>Session ID</th>
+                <th>Login Hour</th>
                 <th>Risk Score</th>
                 <th>Action</th>
+                <th>Status</th>
             </tr>
         </thead>
+
         <tbody>
             {% for s in suspicious %}
             <tr>
-                <td><strong>{{ s.username }}</strong></td>
-                <td>{{ s.login_time }}</td>
+
+                <td><strong>{{ s.session_id }}</strong></td>
+
+                <td>{{ s.login_hour }}</td>
+
                 <td>
-                    <span class="risk-high">{{ s.risk_score }} / 3</span>
+                    {% if s.risk_score >= 3 %}
+                        <span class="risk-high">{{ s.risk_score }}/4</span>
+                    {% elif s.risk_score == 2 %}
+                        <span class="risk-medium">{{ s.risk_score }}/4</span>
+                    {% else %}
+                        <span class="risk-low">{{ s.risk_score }}/4</span>
+                    {% endif %}
                 </td>
+
                 <td>
-                    <a href="/user/{{ s.username }}" class="investigate-btn">Investigate →</a>
+                    <span class="action-badge">{{ s.action }}</span>
                 </td>
+
+                <td>
+                    {% if s.ml_label == "ANOMALY" %}
+                        <span class="status-anomaly">ANOMALY</span>
+                    {% else %}
+                        <span class="status-normal">NORMAL</span>
+                    {% endif %}
+                </td>
+
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
+    {% else %}
+
+    <div class="empty">
+        ✅ No suspicious sessions detected
+    </div>
+
+    {% endif %}
 </div>
-
-{% else %}
-
-<div class="no-suspicious">
-    ✅ No suspicious users detected at this time.
-</div>
-
-{% endif %}
 
 {% endblock %}

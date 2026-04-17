@@ -2,74 +2,125 @@
 
 {% block content %}
 
-<h1 style="color:#b30000;">🧠 Session Investigation</h1>
+<!-- ================= HEADER ================= -->
+<div class="card">
+    <h2>🧠 Session Investigation</h2>
 
-<!-- SESSION INFO -->
-<div style="padding:15px; border:1px solid #ddd; border-radius:8px;">
-
-    <h3>👤 User: {{ session.username }}</h3>
-    <p><b>Session ID:</b> {{ session.id }}</p>
-    <p><b>System:</b> {{ session.system_id }}</p>
-    <p><b>Login:</b> {{ session.login_time }}</p>
-    <p><b>Logout:</b> {{ session.logout_time if session.logout_time else "Active" }}</p>
-
+    <p><strong>User:</strong> {{ session.username }}</p>
+    <p><strong>Session ID:</strong> {{ session.id }}</p>
+    <p><strong>System:</strong> {{ session.system_id }}</p>
+    <p><strong>Login:</strong> {{ session.login_time }}</p>
+    <p>
+        <strong>Logout:</strong> 
+        {% if session.logout_time %}
+            {{ session.logout_time }}
+        {% else %}
+            <span class="status-normal">Active</span>
+        {% endif %}
+    </p>
 </div>
 
-<hr>
+<!-- ================= TIMELINE ================= -->
+<div class="card">
+    <div class="section-title">📊 Activity Timeline</div>
 
-<h2>📊 Activity Timeline</h2>
+    <div class="timeline">
 
-<div style="border-left:3px solid red; padding-left:15px;">
+        <!-- FILES -->
+        {% if files %}
+            {% for f in files %}
+            <div class="timeline-item">
+                <div class="dot red"></div>
+                <div class="content">
+                    📁 {{ f.event_type or "EVENT" }} → {{ f.file_path or "Unknown file" }}
+                </div>
+            </div>
+            {% endfor %}
+        {% endif %}
 
-    <!-- FILES -->
-    <h3>📁 Files</h3>
-    {% for f in files %}
-        <p>{{ f.event_type }} → {{ f.file_path }}</p>
-    {% endfor %}
+        <!-- NETWORK -->
+        {% if network %}
+            {% for n in network %}
+            <div class="timeline-item">
+                <div class="dot blue"></div>
+                <div class="content">
+                    🌐 Sent: {{ n.bytes_sent }} | Received: {{ n.bytes_received }}
+                </div>
+            </div>
+            {% endfor %}
+        {% endif %}
 
-    <!-- NETWORK -->
-    <h3>🌐 Network</h3>
-    {% for n in network %}
-        <p>Sent: {{ n.bytes_sent }} | Received: {{ n.bytes_received }}</p>
-    {% endfor %}
+        <!-- USB -->
+        {% if usb %}
+            {% for u in usb %}
+            <div class="timeline-item">
+                <div class="dot yellow"></div>
+                <div class="content">
+                    🔌 {{ u.device_name or "USB Device" }} 
+                    {% if u.timestamp %} → {{ u.timestamp }}{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% endif %}
 
-    <!-- USB -->
-    <h3>🔌 USB</h3>
-    {% for u in usb %}
-        <p>{{ u.device_name }} ({{ u.start_time }} → {{ u.end_time }})</p>
-    {% endfor %}
+        <!-- APPS -->
+        {% if apps %}
+            {% for a in apps %}
+            <div class="timeline-item">
+                <div class="dot green"></div>
+                <div class="content">
+                    🧩 {{ a.app_name }} 
+                    {% if a.timestamp %} → {{ a.timestamp }}{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% endif %}
 
-    <!-- APPS -->
-    <h3>🧩 Apps</h3>
-    {% for a in apps %}
-        <p>{{ a.app_name }} → {{ a.usage_time }} sec</p>
-    {% endfor %}
+        {% if not files and not network and not usb and not apps %}
+            <div class="empty">No activity recorded</div>
+        {% endif %}
 
+    </div>
 </div>
 
-<hr>
+<!-- ================= THREAT SUMMARY ================= -->
+<div class="card">
+    <div class="section-title">🚨 Threat Summary</div>
 
-<!-- THREAT SUMMARY -->
-<h2 style="color:red;">🚨 Threat Summary</h2>
+    <div class="summary-box">
 
-<div style="background:#ffe6e6; padding:15px; border-radius:8px;">
+        {% set alerts = 0 %}
 
-    {% if files|length > 20 %}
-        <p>📁 High file activity detected</p>
-    {% endif %}
+        {% if files and files|length > 20 %}
+            <p class="risk-high">📁 High file activity detected</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
-    {% if network|length > 10 %}
-        <p>🌐 High network usage detected</p>
-    {% endif %}
+        {% if network and network|length > 10 %}
+            <p class="risk-high">🌐 High network usage detected</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
-    {% if usb|length > 0 %}
-        <p>🔌 USB activity detected</p>
-    {% endif %}
+        {% if usb and usb|length > 0 %}
+            <p class="risk-medium">🔌 USB activity detected</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
-    {% if apps|length == 0 and files|length == 0 %}
-        <p style="color:green;">No threats detected</p>
-    {% endif %}
+        {% if apps and apps|length > 10 %}
+            <p class="risk-medium">🧩 High application switching</p>
+            {% set alerts = alerts + 1 %}
+        {% endif %}
 
+        {% if alerts == 0 %}
+            <p class="status-normal">✅ No suspicious activity detected</p>
+        {% endif %}
+
+    </div>
+</div>
+
+<!-- BACK -->
+<div style="margin-top: 15px;">
+    <a href="/">← Back to Dashboard</a>
 </div>
 
 {% endblock %}

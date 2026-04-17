@@ -3,17 +3,21 @@ import getpass
 import socket
 import time
 import psutil
-import win32gui
-import win32api
 import os
 import json
-import subprocess
 import platform
 
+try:
+    import win32gui
+    import win32api
+    WINDOWS = True
+except ImportError:
+    WINDOWS = False
+
 # =========================================================
-# CONFIG
+# CONFIG — change SERVER to your host machine's IP
 # =========================================================
-SERVER = "http://localhost:5000"
+SERVER = "http://192.168.0.146:5000"   # <-- UPDATE THIS to your PC's LAN IP
 SESSION_FILE = "session.json"
 POLL_INTERVAL = 5
 
@@ -41,26 +45,33 @@ def start_session():
     existing = load_session()
     if existing:
         session_id = existing["session_id"]
+        print("Resumed session:", session_id)
         return
+
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+    except:
+        ip = "127.0.0.1"
 
     data = {
         "username": getpass.getuser(),
         "system_id": socket.gethostname(),
-        "ip_address": socket.gethostbyname(socket.gethostname())
+        "ip_address": ip
     }
 
     res = requests.post(f"{SERVER}/start_session", json=data, timeout=5)
     session_id = res.json()["session_id"]
     save_session({"session_id": session_id})
-
     print("Session started:", session_id)
 
 # =========================================================
 # IDLE
 # =========================================================
 def get_idle_time():
-    last_input = win32api.GetLastInputInfo()
-    return (win32api.GetTickCount() - last_input) / 1000
+    if WINDOWS:
+        last_input = win32api.GetLastInputInfo()
+        return (win32api.GetTickCount() - last_input) / 1000
+    return 0
 
 
 def track_idle():
@@ -74,11 +85,57 @@ def track_idle():
         pass
 
 # =========================================================
-# ACTION FETCH
+# APP TRACKING — now actually sends data
+# =========================================================
+def track_apps():
+    app = ""
+    if WINDOWS:
+        try:
+            app = win32gui.GetWindowText(win32gui.GetForegroundWindow())
+        except:
+            pass
+    else:
+        app = "unknown_app"
+
+    if app and app not in app_start_times:
+        app_start_times[app] = time.time()
+        try:
+            requests.post(
+                f"{SERVER}/track_app",
+                json={"session_id": session_id, "app_name": app},
+                timeout=3
+            )
+        except:
+            pass
+
+# =========================================================
+# NETWORK TRACKING — now actually sends data
+# =========================================================
+def track_network():
+    try:
+        counters = psutil.net_io_counters()
+        requests.post(
+            f"{SERVER}/track_network",
+            json={
+                "session_id": session_id,
+                "bytes_sent": counters.bytes_sent,
+                "bytes_received": counters.bytes_recv
+            },
+            timeout=3
+        )
+    except:
+        pass
+
+# =========================================================
+# ACTION FETCH — now filters by session_id server-side
 # =========================================================
 def fetch_actions():
     try:
-        res = requests.get(f"{SERVER}/get_actions", timeout=5)
+        res = requests.get(
+            f"{SERVER}/get_actions",
+            params={"session_id": session_id},
+            timeout=5
+        )
         return res.json().get("actions", [])
     except:
         return []
@@ -87,7 +144,7 @@ def fetch_actions():
 # REAL SYSTEM ACTIONS
 # =========================================================
 def shutdown_machine():
-    print("💥 SHUTDOWN TRIGGERED")
+    print("SHUTDOWN TRIGGERED")
     if platform.system() == "Windows":
         os.system("shutdown /s /f /t 0")
     else:
@@ -95,73 +152,70 @@ def shutdown_machine():
 
 
 def restart_machine():
-    os.system("shutdown /r /t 0")
+    if platform.system() == "Windows":
+        os.system("shutdown /r /t 0")
+    else:
+        os.system("reboot")
 
 
 def block_user():
-    print("🚫 BLOCK USER: closing applications")
-
-    # close all user-level processes safely
+    print("BLOCK USER: closing applications")
     for proc in psutil.process_iter(['pid', 'name']):
         try:
             name = proc.info['name'].lower()
-
-            # skip critical system processes
             if name in ["system", "registry", "explorer.exe", "wininit.exe", "csrss.exe"]:
                 continue
-
-            os.system(f"taskkill /F /PID {proc.info['pid']}")
-
+            if platform.system() == "Windows":
+                os.system(f"taskkill /F /PID {proc.info['pid']}")
+            else:
+                proc.kill()
         except:
             pass
 
+
 def limit_network():
-    os.system('netsh interface set interface "Wi-Fi" disable')
+    if platform.system() == "Windows":
+        os.system('netsh interface set interface "Wi-Fi" disable')
 
 
 def restore_network():
-    os.system('netsh interface set interface "Wi-Fi" enable')
+    if platform.system() == "Windows":
+        os.system('netsh interface set interface "Wi-Fi" enable')
 
 
 def kill_process(name):
-    os.system(f"taskkill /F /IM {name}")
+    if platform.system() == "Windows":
+        os.system(f"taskkill /F /IM {name}")
+    else:
+        os.system(f"pkill -f {name}")
 
 # =========================================================
-# EXECUTION ENGINE (FIXED)
+# EXECUTION ENGINE
 # =========================================================
 def execute_action(action):
-
     act = str(action.get("action", "")).strip().upper()
     sid = str(action.get("session_id"))
 
-    # session safety
     if sid and session_id and sid != str(session_id):
         return
 
-    print("⚙️ ACTION:", act)
+    print("ACTION:", act)
 
     try:
         if act == "BLOCK_USER":
             block_user()
-
         elif act == "SHUTDOWN":
             shutdown_machine()
-
         elif act == "RESTART":
             restart_machine()
-
         elif act == "RESTRICT_USER":
             kill_process("chrome.exe")
-
         elif act == "LIMIT_NETWORK":
             limit_network()
-
         elif act == "RESTORE_NETWORK":
             restore_network()
-
         elif act == "KILL_PROCESS":
             kill_process(action.get("process_name", "chrome.exe"))
-
         else:
             print("UNKNOWN ACTION:", act)
 
@@ -173,18 +227,6 @@ def execute_action(action):
 
     except Exception as e:
         print("EXEC ERROR:", e)
-
-# =========================================================
-# TRACKING
-# =========================================================
-def track_apps():
-    app = win32gui.GetWindowText(win32gui.GetForegroundWindow())
-    if app and app not in app_start_times:
-        app_start_times[app] = time.time()
-
-
-def track_network():
-    psutil.net_io_counters()
 
 # =========================================================
 # MAIN LOOP
@@ -201,7 +243,7 @@ def run():
         actions = fetch_actions()
 
         if actions:
-            print("⚙️ Actions received:", len(actions))
+            print("Actions received:", len(actions))
 
         for a in actions:
             execute_action(a)

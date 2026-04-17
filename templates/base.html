@@ -2,13 +2,155 @@
 <html>
 <head>
     <title>Insider Threat Monitor</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background: #0b1220;
+            color: #e2e8f0;
+        }
+
+        /* NAVBAR */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 25px;
+            background: #111827;
+            border-bottom: 1px solid #1f2937;
+        }
+
+        nav h2 {
+            margin: 0;
+            font-size: 20px;
+            color: #f87171;
+        }
+
+        .nav-right {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .badge {
+            background: #1f2937;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #93c5fd;
+        }
+
+        /* MAIN */
+        .container {
+            padding: 25px;
+        }
+
+        /* CARDS */
+        .card {
+            background: #111827;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #1f2937;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #93c5fd;
+        }
+
+        /* SEARCH */
+        .search-bar {
+            display: flex;
+            gap: 10px;
+        }
+
+        .search-bar input {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            border: none;
+            background: #0b1220;
+            color: white;
+        }
+
+        .search-bar button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+
+        .search-bar button:hover {
+            background: #1d4ed8;
+        }
+
+        /* TABLE */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #1f2937;
+            padding: 10px;
+            text-align: left;
+            font-size: 13px;
+            color: #93c5fd;
+        }
+
+        td {
+            padding: 10px;
+            border-top: 1px solid #1f2937;
+        }
+
+        tr:hover {
+            background: #0f172a;
+        }
+
+        /* BADGES */
+        .risk-high { color: #ef4444; font-weight: bold; }
+        .risk-medium { color: #f59e0b; font-weight: bold; }
+        .risk-low { color: #22c55e; }
+
+        .status-anomaly {
+            color: #ef4444;
+            font-weight: bold;
+        }
+
+        .status-normal {
+            color: #22c55e;
+        }
+
+        .action-badge {
+            background: #374151;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        /* EMPTY STATE */
+        .empty {
+            text-align: center;
+            padding: 20px;
+            color: #64748b;
+        }
+
+    </style>
 </head>
+
 <body>
 
 <nav>
-    <h2>🔐 Insider Monitor</h2>
-    <span class="nav-badge">Security Console</span>
+    <h2>🔐 Insider Threat Monitor</h2>
+
+    <div class="nav-right">
+        <span class="badge">AI Security Dashboard</span>
+    </div>
 </nav>
 
 <div class="container">
