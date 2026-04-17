@@ -34,7 +34,7 @@ def analyze():
     files = data["files"]
     apps = data["apps"]
 
-    risk = predict_risk([login_hour, files, apps])
+    risk, score = predict_risk([login_hour, files, apps])
 
     reason = []
 
@@ -45,10 +45,11 @@ def analyze():
     if apps > 5:
         reason.append("Unusual app usage")
 
-    return jsonify({
-        "risk": risk,
-        "reason": reason
-    })
+  return jsonify({
+    "risk": risk,
+    "score": score,
+    "reason": reason
+})
 
 if __name__ == "__main__":
     app.run(debug=True)
